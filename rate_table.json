@@ -1,0 +1,81 @@
+{
+  "_meta": {
+    "description": "Synthetic LTL freight contract & tariff source-of-truth for the invoice auditor.",
+    "currency": "USD",
+    "rate_basis": "Linehaul priced per hundredweight (CWT). charged_linehaul = (weight_lb / 100) * cwt_rate, then customer discount applied, then fuel surcharge applied to the post-discount linehaul.",
+    "audit_order": ["classify line", "look up applicable rate/rule", "compute expected", "compare to charged", "triage if low-confidence"]
+  },
+
+  "tariff": {
+    "_note": "cwt_rate is dollars per 100 lb. Rates decline as weight increases (standard LTL). Lane = origin_zone-dest_zone. Class is freight class; higher class = denser/higher-value handling = higher rate.",
+    "lanes": {
+      "CHI-DEN": {
+        "class_50":  { "L5C": 38.50, "5C": 31.20, "1M": 26.40, "5M": 21.10 },
+        "class_85":  { "L5C": 52.75, "5C": 43.60, "1M": 36.90, "5M": 29.40 },
+        "class_125": { "L5C": 71.20, "5C": 59.80, "1M": 50.10, "5M": 40.20 }
+      },
+      "CHI-ATL": {
+        "class_50":  { "L5C": 41.00, "5C": 33.80, "1M": 28.60, "5M": 22.90 },
+        "class_85":  { "L5C": 56.10, "5C": 46.40, "1M": 39.20, "5M": 31.30 },
+        "class_125": { "L5C": 75.80, "5C": 63.50, "1M": 53.40, "5M": 42.80 }
+      },
+      "DEN-LAX": {
+        "class_50":  { "L5C": 44.20, "5C": 36.50, "1M": 30.90, "5M": 24.70 },
+        "class_85":  { "L5C": 60.30, "5C": 49.90, "1M": 42.10, "5M": 33.60 },
+        "class_125": { "L5C": 81.40, "5C": 68.20, "1M": 57.30, "5M": 45.90 }
+      }
+    },
+    "weight_breaks": {
+      "_note": "Which break applies is a function of actual billable weight. Lower break = higher per-cwt rate.",
+      "L5C": { "min_lb": 0,    "max_lb": 499 },
+      "5C":  { "min_lb": 500,  "max_lb": 999 },
+      "1M":  { "min_lb": 1000, "max_lb": 4999 },
+      "5M":  { "min_lb": 5000, "max_lb": 99999 }
+    },
+    "minimum_charge": 95.00
+  },
+
+  "fuel_surcharge_schedule": {
+    "_note": "Percentage applied to the post-discount linehaul. Keyed by week the shipment dated into. Auditor must match ship_date to the correct week.",
+    "2026-W18": 0.285,
+    "2026-W19": 0.292,
+    "2026-W20": 0.288,
+    "2026-W21": 0.301,
+    "2026-W22": 0.297
+  },
+
+  "accessorials": {
+    "_note": "valid_for restricts which shipment types may legitimately carry this charge. If a line's shipment context doesn't match, it's an unauthorized accessorial.",
+    "LIFTGATE":    { "description": "Liftgate service",        "rate": 95.00,  "basis": "flat", "valid_for": ["no_dock_origin", "no_dock_dest"] },
+    "RESIDENTIAL": { "description": "Residential delivery",     "rate": 48.00,  "basis": "flat", "valid_for": ["residential_dest"] },
+    "DETENTION":   { "description": "Detention (per 30 min)",   "rate": 42.50,  "basis": "per_unit", "valid_for": ["any"] },
+    "REDELIVERY":  { "description": "Redelivery attempt",       "rate": 65.00,  "basis": "flat", "valid_for": ["failed_first_attempt"] },
+    "INSIDE":      { "description": "Inside delivery",          "rate": 78.00,  "basis": "flat", "valid_for": ["inside_requested"] },
+    "LIMITED":     { "description": "Limited access location",  "rate": 88.00,  "basis": "flat", "valid_for": ["limited_access_site"] }
+  },
+
+  "customers": {
+    "_note": "Each customer has a contracted discount off tariff linehaul, plus optional waivers (accessorials that must NOT be billed to them) and free allowances.",
+    "ACME-1001": {
+      "name": "Acme Manufacturing",
+      "linehaul_discount_pct": 0.62,
+      "waived_accessorials": ["RESIDENTIAL"],
+      "free_allowances": { "DETENTION": 1 },
+      "notes": "Residential surcharge waived per master agreement. First 30 min detention free."
+    },
+    "GLOBEX-1002": {
+      "name": "Globex Logistics",
+      "linehaul_discount_pct": 0.55,
+      "waived_accessorials": [],
+      "free_allowances": {},
+      "notes": "Standard contract, no waivers."
+    },
+    "INITECH-1003": {
+      "name": "Initech Distribution",
+      "linehaul_discount_pct": 0.68,
+      "waived_accessorials": ["LIFTGATE", "REDELIVERY"],
+      "free_allowances": { "REDELIVERY": 99 },
+      "notes": "High-volume account. Liftgate and redelivery waived entirely."
+    }
+  }
+}
