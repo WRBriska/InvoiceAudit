@@ -1,13 +1,16 @@
 """
 llm_client.py — the language-model boundary.
 
-The LLM does TWO things and nothing else:
+The LLM does THREE things and nothing else:
+  0. extract_line(): parse a messy free-text invoice line into structured fields
+     (the text/PDF front-end; see extract.py). Reading, not arithmetic.
   1. normalize_line(): map a free-text invoice line description to a catalog code
      (e.g. "lift-gate svc" -> "LIFTGATE"). This is fuzzy classification — the part
      a language model is genuinely good at and rules are brittle at.
   2. summarize_findings(): turn the deterministic findings into a readable note.
 
-It never computes or judges money. That keeps the audit's numbers reproducible
+It never computes or judges money. Even extraction only *copies* the stated
+amount; it never recomputes it. That keeps the audit's numbers reproducible
 regardless of which client is plugged in.
 
 Two implementations:
@@ -25,6 +28,10 @@ CATALOG_HINT = ["LIFTGATE", "RESIDENTIAL", "DETENTION", "REDELIVERY", "INSIDE", 
 
 
 class LLMClient:
+    def extract_line(self, raw_text):
+        """Parse one messy invoice line of text -> structured fields. Language, not math."""
+        raise NotImplementedError
+
     def normalize_line(self, description, raw_code=None):
         raise NotImplementedError
 
@@ -43,6 +50,45 @@ class MockClient(LLMClient):
         "inside": "INSIDE", "inside delivery": "INSIDE",
         "limited": "LIMITED", "limited access": "LIMITED",
     }
+
+    def extract_line(self, raw_text):
+        """Deterministic offline parse of a messy line. The real model swaps in here.
+
+        Recovers only the genuinely-textual fields (type, amount, and for linehaul
+        the stated class & weight; for accessorials the description & units). It
+        never computes anything — extraction is reading, not arithmetic.
+        """
+        import re
+        t = (raw_text or "").strip()
+        out = {}
+
+        # ref is the leading token (L1, A2, ...)
+        m = re.match(r"\s*([A-Za-z]\d+)\b", t)
+        if m:
+            out["ref"] = m.group(1).upper()
+
+        # dollar amount is the trailing $-figure
+        amt = re.findall(r"\$?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*$", t)
+        out["amount"] = round(float(amt[0]), 2) if amt else 0.0
+
+        if re.search(r"line\s?haul|linehaul", t, re.I):
+            out["type"] = "linehaul"
+            cls = re.search(r"(?:cls|class|cl)\s*\.?\s*([0-9]+(?:\.[0-9])?)", t, re.I)
+            if cls:
+                out["stated_class"] = "class_" + cls.group(1).replace(".0", "")
+            wt = re.search(r"([0-9][0-9,]{1,6})\s*(?:lb|lbs|#)", t, re.I)
+            if wt:
+                out["stated_weight_lb"] = int(wt.group(1).replace(",", ""))
+        else:
+            out["type"] = "accessorial"
+            qty = re.search(r"(?:x|qty|units?)\s*\.?\s*([0-9]+)", t, re.I)
+            out["units"] = int(qty.group(1)) if qty else 1
+            # description: strip leading ref, trailing qty/amount, and dot leaders
+            desc = re.sub(r"^\s*[A-Za-z]\d+\s+", "", t)
+            desc = re.sub(r"(?:x|qty|units?)\s*\.?\s*[0-9]+.*$", "", desc, flags=re.I)
+            desc = re.sub(r"[.\s]*\$?\s*[0-9]+(?:\.[0-9]{1,2})?\s*$", "", desc)
+            out["description"] = desc.strip(" .")
+        return out
 
     def normalize_line(self, description, raw_code=None):
         if raw_code in CATALOG_HINT:
@@ -67,6 +113,28 @@ class AnthropicClient(LLMClient):
         from anthropic import Anthropic
         self.client = Anthropic()  # reads ANTHROPIC_API_KEY
         self.model = model
+
+    def extract_line(self, raw_text):
+        prompt = (
+            "Extract structured fields from one freight invoice line. Reply as JSON "
+            "with keys: ref (string like 'L1'), type ('linehaul' or 'accessorial'), "
+            "amount (number, the dollar charge). If linehaul also give stated_class "
+            "(e.g. 'class_85') and stated_weight_lb (integer). If accessorial also "
+            "give description (string) and units (integer, default 1). "
+            "Do not compute or alter the amount — copy it. No prose.\n"
+            f'Line: "{raw_text}"'
+        )
+        msg = self.client.messages.create(
+            model=self.model, max_tokens=120,
+            messages=[{"role": "user", "content": prompt}])
+        try:
+            text = "".join(b.text for b in msg.content if b.type == "text")
+            data = json.loads(text[text.find("{"): text.rfind("}") + 1])
+            if "amount" in data:
+                data["amount"] = round(float(data["amount"]), 2)
+            return data
+        except Exception:
+            return {}  # extraction failure surfaces as a missing line, measured by the harness
 
     def normalize_line(self, description, raw_code=None):
         prompt = (

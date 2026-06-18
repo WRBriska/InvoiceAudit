@@ -31,8 +31,14 @@ class AuditState(TypedDict):
 
 
 def node_extract(state: AuditState) -> AuditState:
-    # Synthetic invoices are already structured, so extraction is a passthrough.
-    # A real text/PDF front-end would populate state["invoice"] here via the LLM.
+    # If the invoice arrives as messy text (a carrier PDF/text front-end), the LLM
+    # parses its line items into structured fields here. If it's already structured
+    # (the synthetic eval path), extraction is a passthrough — the audit numbers are
+    # identical either way, by design.
+    inv = state["invoice"]
+    if "raw_text" in inv and "lines" not in inv:
+        from extract import extract_lines_from_text
+        inv["lines"] = extract_lines_from_text(inv["raw_text"])
     return state
 
 

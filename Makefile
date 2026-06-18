@@ -1,4 +1,4 @@
-.PHONY: install generate audit eval all clean
+.PHONY: install generate audit eval extract-demo extract-eval all clean
 
 install:
 	pip install -r requirements.txt
@@ -12,8 +12,16 @@ audit:
 eval:
 	python3 evaluate.py
 
+# Show one invoice go structured -> messy text -> LLM extraction -> audit
+extract-demo:
+	python3 extract.py
+
+# Measure LLM recall of the text extraction front-end
+extract-eval:
+	python3 evaluate_extraction.py
+
 # Full pipeline: synthetic data -> audit -> scorecard
 all: generate audit eval
 
 clean:
-	rm -f synthetic_invoices.jsonl answer_keys.jsonl audits.jsonl eval_report.json
+	rm -f synthetic_invoices.jsonl answer_keys.jsonl audits.jsonl eval_report.json extraction_report.json
