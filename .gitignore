@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+# generated artifacts (reproducible via `make all` / `make extract-eval`)
+synthetic_invoices.jsonl
+answer_keys.jsonl
+audits.jsonl
+eval_report.json
+extraction_report.json
