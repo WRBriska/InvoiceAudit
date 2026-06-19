@@ -1,12 +1,15 @@
 # Freight Invoice Auditor
 
+[![eval](https://github.com/WRBriska/InvoiceAudit/actions/workflows/eval.yml/badge.svg)](https://github.com/WRBriska/InvoiceAudit/actions/workflows/eval.yml)
+
 A production-shaped AI system that audits LTL freight invoices against contract
 terms, flags overbilling with exact dollar impact, and **routes what it isn't sure
 about to a human instead of guessing**. Built with LangGraph, with a deliberate
 architectural rule: the language model never touches a number.
 
 It ships with a synthetic-data generator, a labeled evaluation set, and an eval
-harness — so every claim below is reproducible with one command.
+harness — so every claim below is reproducible with one command, and **CI re-runs
+the whole pipeline on every push and fails the build if quality regresses.**
 
 ```bash
 make install   # langgraph + anthropic
@@ -118,6 +121,20 @@ is the four duplicate-charge cases the system **declined to claim** without huma
 confirmation. Declining to assert overbilling on an ambiguous repeat charge is
 correct behavior, not a miss.
 
+### Continuous verification
+
+The scorecard above isn't a point-in-time screenshot. A GitHub Actions workflow
+([`.github/workflows/eval.yml`](.github/workflows/eval.yml)) runs `make all` and
+`make extract-eval` on every push and pull request, then **fails the build** unless:
+
+- confident precision = 1.0,
+- confident recall = 1.0, and
+- false positives on decoy lines = 0.
+
+CI runs entirely offline through the deterministic mock client — no API key — so the
+guarantee holds for every contributor. Any regression in the audit logic breaks the
+build instead of silently eroding the numbers.
+
 ### Iteration (v1 → v2)
 
 The first version scored **0.866 precision**. The eval's per-type breakdown
@@ -157,6 +174,7 @@ generate_invoices.py   synthetic invoices + hidden answer keys
 run_audit.py           audit every invoice -> audits.jsonl
 evaluate.py            scorecard vs answer keys
 Makefile               make all
+.github/workflows/     CI: re-runs the pipeline + enforces the quality gate
 ```
 
 ## Notes
