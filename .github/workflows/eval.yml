@@ -1,0 +1,46 @@
+name: eval
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  audit-and-score:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run full pipeline (generate -> audit -> score)
+        run: make all
+
+      - name: Measure extraction-front-end recall
+        run: make extract-eval
+
+      - name: Enforce audit quality gate
+        # Runs offline via the deterministic mock client (no API key in CI).
+        # Fails the build if precision/recall regress or any decoy is flagged.
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          r = json.load(open("eval_report.json"))
+          checks = {
+              "confident_precision": (r["confident_precision"], 1.0),
+              "confident_recall":    (r["confident_recall"], 1.0),
+              "false_positives_on_decoys": (r["false_positives_on_decoys"], 0),
+          }
+          ok = True
+          for name, (got, want) in checks.items():
+              cmp = (got >= want) if isinstance(want, float) else (got <= want)
+              print(f"{'PASS' if cmp else 'FAIL'}  {name}: {got} (want {want})")
+              ok = ok and cmp
+          sys.exit(0 if ok else 1)
+          PY
