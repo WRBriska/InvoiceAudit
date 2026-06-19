@@ -1,4 +1,4 @@
-.PHONY: install generate audit eval extract-demo extract-eval all clean
+.PHONY: install generate audit eval golden extract-demo extract-eval all clean
 
 install:
 	pip install -r requirements.txt
@@ -12,6 +12,11 @@ audit:
 eval:
 	python3 evaluate.py
 
+# Independent oracle: run the real engine against a hand-labeled golden set whose
+# expected dollars are literals (not the engine's own formula). Exits nonzero on drift.
+golden:
+	python3 evaluate_golden.py
+
 # Show one invoice go structured -> messy text -> LLM extraction -> audit
 extract-demo:
 	python3 extract.py
@@ -20,8 +25,8 @@ extract-demo:
 extract-eval:
 	python3 evaluate_extraction.py
 
-# Full pipeline: synthetic data -> audit -> scorecard
-all: generate audit eval
+# Full pipeline: synthetic data -> audit -> scorecard -> independent golden check
+all: generate audit eval golden
 
 clean:
-	rm -f synthetic_invoices.jsonl answer_keys.jsonl audits.jsonl eval_report.json extraction_report.json
+	rm -f synthetic_invoices.jsonl answer_keys.jsonl audits.jsonl eval_report.json extraction_report.json golden_report.json

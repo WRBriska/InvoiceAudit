@@ -22,6 +22,12 @@ jobs:
       - name: Run full pipeline (generate -> audit -> score)
         run: make all
 
+      - name: Independent oracle (hand-labeled golden set)
+        # Runs the real engine against ground truth derived by hand, NOT from the
+        # engine's own pricing formula. Catches shared-formula bugs the circular
+        # answer-key eval is blind to. Exits nonzero on any drift from ground truth.
+        run: make golden
+
       - name: Measure extraction-front-end recall
         run: make extract-eval
 
