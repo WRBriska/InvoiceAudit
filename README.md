@@ -7,13 +7,15 @@ terms, flags overbilling with exact dollar impact, and **routes what it isn't su
 about to a human instead of guessing**. Built with LangGraph, with a deliberate
 architectural rule: the language model never touches a number.
 
-It ships with a synthetic-data generator, a labeled evaluation set, and an eval
-harness — so every claim below is reproducible with one command, and **CI re-runs
-the whole pipeline on every push and fails the build if quality regresses.**
+It ships with a synthetic-data generator, a labeled evaluation set, an eval harness,
+and an **independent hand-labeled oracle** that catches even bugs shared between the
+generator and the engine — so every claim below is reproducible with one command, and
+**CI re-runs the whole pipeline on every push and fails the build if quality regresses.**
 
 ```bash
 make install   # langgraph + anthropic
-make all       # generate data -> audit -> print scorecard
+make all       # generate data -> audit -> score -> check vs independent oracle
+make golden    # run just the independent hand-labeled golden-set check
 ```
 
 ---
