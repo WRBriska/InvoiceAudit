@@ -18,6 +18,45 @@ make all       # generate data -> audit -> score -> check vs independent oracle
 make golden    # run just the independent hand-labeled golden-set check
 ```
 
+## See it run
+
+A real invoice making the full trip — structured fields in, deterministic verdict
+out. `INV-2026-00000` is billed `$731.14` of linehaul on lane CHI-DEN; the engine
+recomputes the contractually correct figure (rate → minimum → 55% discount →
+28.5% fuel) at `$618.79` and flags the difference:
+
+```json
+{
+  "line_ref": "L1",
+  "type": "linehaul_overcharge",
+  "charged": 731.14,
+  "expected": 618.79,
+  "dollar_impact": 112.35,
+  "explanation": "Linehaul exceeds contracted rate/discount/fuel for stated class & weight.",
+  "confidence": "high"
+}
+```
+
+And the part most "anomaly detectors" get wrong — declining to assert when a charge
+is genuinely ambiguous. On another invoice, a second detention line *could* be a
+duplicate or a real second event, so it goes to the review queue instead of to the
+customer:
+
+```json
+{
+  "line_ref": "A2",
+  "type": "duplicate_charge",
+  "charged": 255.0,
+  "dollar_impact": 255.0,
+  "explanation": "DETENTION already billed on A1; repeat charge — verify it reflects a distinct event.",
+  "confidence": "low"
+}
+```
+
+`make extract-demo` shows the same invoice rendered as messy carrier-style text,
+parsed back to these structured fields by the LLM, and audited to the identical
+verdict — the [extraction front-end](#extraction-front-end) below.
+
 ---
 
 ## The problem
@@ -59,8 +98,9 @@ extract ─▶ classify ─▶ audit ─▶ triage ─▶ report
  [LLM*]     [LLM]       [det]    [det]     [LLM]
 ```
 
-- **extract** — passthrough for structured input; the seam where a PDF/text
-  front-end plugs in (see roadmap).
+- **extract** — passthrough for already-structured input; runs the LLM
+  [text-extraction front-end](#extraction-front-end) when an invoice arrives as
+  raw text. Either way the audit numbers are identical.
 - **classify** — normalizes each line description to a catalog code with a
   confidence; a description that maps to *nothing* is a confident phantom, not an
   ambiguous one.
@@ -112,11 +152,12 @@ deterministic logic catches every planted error across all eight types and flags
 none of the decoys. That's the hybrid design delivering — the numbers can't be
 wrong because the LLM never produces them.
 
-It does **not** prove real-world end-to-end recall, because the inputs here are
-already structured. Real-world recall lives entirely in the **extraction layer**:
-how reliably the LLM turns a messy PDF into correct structured fields. The harness
-is built to measure exactly that the moment a text front-end is added — which is
-the honest next milestone, not a number to inflate today.
+It does **not** prove real-world end-to-end recall, because the inputs to the
+*audit* are already structured. Real-world recall lives in the **extraction layer**:
+how reliably the LLM turns a messy invoice into correct structured fields. That
+layer now exists and is measured separately — see [Extraction front-end](#extraction-front-end).
+Keeping the two scores apart is deliberate: a perfect rule engine and a perfect
+extractor are different claims, and collapsing them would flatter both.
 
 The dollar-recovery gap (0.944, not 1.0) is also intentional: the ~$350 difference
 is the four duplicate-charge cases the system **declined to claim** without human
@@ -193,10 +234,40 @@ Result: **0.866 → 1.000 precision**, with the genuinely ambiguous cases correc
 sitting in the review queue. The point isn't the 1.0 — it's that the eval found the
 defects and the fixes were principled, not number-chasing.
 
+## Extraction front-end
+
+The text/PDF seam, with its own honest scorecard (`make extract-eval`). Each
+structured invoice is rendered to messy carrier-style line text, extracted back to
+structured fields through the active LLM client, and scored field-by-field against
+the original:
+
+```
+EXTRACTION FRONT-END — RECALL  (client: MockClient)
+  invoices   200   lines   401
+  line recall            1.000
+  line full-field acc.   1.000
+  field: amount 1.000 · type 1.000 · stated_class 1.000 · stated_weight_lb 1.000 · units 1.000
+```
+
+**Read that 1.000 correctly.** The default `MockClient` is a deterministic regex
+parser, so against this rendered text it is a *baseline*, not a model result — it
+exists so the harness, the offline path, and CI all work without an API key. The
+real measurement is one environment variable away: set `ANTHROPIC_API_KEY` and the
+identical harness scores a genuine model (`claude-haiku-4-5`) on the same task,
+which is where extraction recall becomes a real number. Two boundaries are kept
+deliberately honest:
+
+- The LLM **only reads** — `extract_line()` copies the stated dollar amount
+  verbatim and never recomputes it, so the hybrid guarantee holds end to end.
+- Only the **printed charge lines** go through extraction. Shipment context
+  (dock/residential flags, lane, customer) is assumed to arrive structured, the way
+  it does from an EDI 210 / manifest. Pretending to OCR it out of prose would
+  overstate the front-end's reach.
+
 ## Roadmap
 
-- **Messy-text / PDF extraction front-end** — the real test of LLM recall; the
-  harness already measures it.
+- ~~**Messy-text / PDF extraction front-end**~~ — *done* (see above); the obvious
+  next step is feeding real scanned-PDF text rather than rendered lines.
 - **Inference-mode context** — infer `residential`/`no-dock` from address text
   rather than reading explicit flags (harder, more realistic).
 - **Multiple simultaneous discrepancies per invoice** (currently capped at one for
@@ -209,14 +280,16 @@ defects and the fixes were principled, not number-chasing.
 rate_table.json        contract & tariff source of truth
 pricing.py             deterministic audit engine (all math + rules live here)
 llm_client.py          LLM boundary: real Anthropic client + offline mock
+extract.py             messy-text extraction front-end (+ demo)
 audit_graph.py         LangGraph pipeline
 generate_invoices.py   synthetic invoices + hidden answer keys
 run_audit.py           audit every invoice -> audits.jsonl
 evaluate.py            scorecard vs answer keys (same-formula keys; see caveat)
+evaluate_extraction.py extraction-recall scorecard
 evaluate_golden.py     independent oracle: real engine vs hand-labeled ground truth
 golden_invoices.jsonl  hand-crafted invoices for the independent check
 golden_truth.jsonl     hand-derived expected dollars + outcomes (literals, shown work)
-Makefile               make all
+Makefile               make all · make extract-demo · make extract-eval
 .github/workflows/     CI: re-runs the pipeline + enforces the quality gate
 ```
 
